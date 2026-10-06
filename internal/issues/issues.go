@@ -10,13 +10,20 @@ import (
 )
 
 type Issue struct {
-	Repo      depsdev.Repo
-	Number    int
-	Title     string
-	URL       string
-	Labels    []string
-	Assignees []string
-	UpdatedAt time.Time
+	Repo       depsdev.Repo
+	Number     int
+	Title      string
+	URL        string
+	Labels     []string
+	Assignees  []string
+	AssignedAt time.Time
+	HasOpenPR  bool
+	UpdatedAt  time.Time
+}
+
+type RepoInfo struct {
+	Archived bool
+	PushedAt time.Time
 }
 
 type Client struct {

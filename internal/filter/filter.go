@@ -1,11 +1,32 @@
 package filter
 
-import "github.com/destinyamba/gh-pullkin/internal/issues"
+import (
+	"time"
 
-func Taken(issue issues.Issue) bool {
-	return false
+	"github.com/destinyamba/gh-pullkin/internal/issues"
+)
+
+const (
+	FreshAssigneeDays = 28
+	DeadAfterMonths   = 3
+)
+
+func Taken(issue issues.Issue, now time.Time) bool {
+	if issue.HasOpenPR {
+		return true
+	}
+	if len(issue.Assignees) == 0 {
+		return false
+	}
+	if issue.AssignedAt.IsZero() {
+		return true
+	}
+	return issue.AssignedAt.After(now.AddDate(0, 0, -FreshAssigneeDays))
 }
 
-func Dead(lastMerge int64) bool {
-	return false
+func Dead(repo issues.RepoInfo, now time.Time) bool {
+	if repo.Archived {
+		return true
+	}
+	return repo.PushedAt.Before(now.AddDate(0, -DeadAfterMonths, 0))
 }
