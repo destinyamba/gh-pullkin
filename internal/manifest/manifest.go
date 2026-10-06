@@ -1,6 +1,12 @@
 package manifest
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
 
 type Ecosystem string
 
@@ -17,5 +23,20 @@ type Dep struct {
 }
 
 func Scan(dir string) ([]Dep, error) {
-	return nil, errors.New("not implemented")
+	path := filepath.Join(dir, "go.mod")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read go.mod: %w", err)
+	}
+
+	deps, err := ParseGoMod(data)
+	if err != nil {
+		return nil, fmt.Errorf("parse go.mod: %w", err)
+	}
+
+	return deps, nil
 }
