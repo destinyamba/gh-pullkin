@@ -32,7 +32,17 @@ query($q: String!, $first: Int!) {
       }
     }
   }
-}`
+}
+`
+
+const repoInfoQuery = `
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    isArchived
+    pushedAt
+  }
+}
+`
 
 type searchResponse struct {
 	Search struct {
@@ -63,6 +73,13 @@ type searchResponse struct {
 			} `json:"closedByPullRequestsReferences"`
 		} `json:"nodes"`
 	} `json:"search"`
+}
+
+type repoInfoResponse struct {
+	Repository struct {
+		IsArchived bool      `json:"isArchived"`
+		PushedAt   time.Time `json:"pushedAt"`
+	} `json:"repository"`
 }
 
 var Labels = []string{
@@ -150,4 +167,17 @@ func (c *Client) Open(ctx context.Context, repo depsdev.Repo) ([]Issue, error) {
 		})
 	}
 	return issues, nil
+}
+
+func (c *Client) Info(ctx context.Context, repo depsdev.Repo) (RepoInfo, error) {
+	var resp repoInfoResponse
+	vars := map[string]interface{}{"owner": repo.Owner, "name": repo.Name}
+	if err := c.gh.DoWithContext(ctx, repoInfoQuery, vars, &resp); err != nil {
+		return RepoInfo{}, fmt.Errorf("get repo info %s/%s: %w", repo.Owner, repo.Name, err)
+	}
+
+	return RepoInfo{
+		Archived: resp.Repository.IsArchived,
+		PushedAt: resp.Repository.PushedAt,
+	}, nil
 }
