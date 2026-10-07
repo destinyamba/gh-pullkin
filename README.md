@@ -25,7 +25,7 @@ pullkin skips an issue with no activity in 12 months. It is often forgotten or n
 pullkin skips an issue if either is true:
 
 - **It has a linked open pull request.** Someone is already working on it.
-- **It was assigned in the last 28 days.** The assignee is likely still on it. If pullkin can't tell when the issue was assigned, it treats the assignee as active.f
+- **It was assigned in the last 28 days.** The assignee is likely still on it. If pullkin can't tell when the issue was assigned, it treats the assignee as active.
 
 An issue assigned more than 28 days ago with no open PR is shown. The assignee may have moved on, so ask in the issue before you start.
 
