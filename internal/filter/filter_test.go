@@ -37,6 +37,26 @@ func TestTaken(t *testing.T) {
 	}
 }
 
+func TestStale(t *testing.T) {
+	tests := []struct {
+		name  string
+		issue issues.Issue
+		want  bool
+	}{
+		{"updated recently", issues.Issue{UpdatedAt: daysAgo(10)}, false},
+		{"updated just inside the limit", issues.Issue{UpdatedAt: now.AddDate(0, -StaleIssueMonths, 1)}, false},
+		{"updated just outside the limit", issues.Issue{UpdatedAt: now.AddDate(0, -StaleIssueMonths, -1)}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Stale(tt.issue, now); got != tt.want {
+				t.Errorf("expected %v, found %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestDead(t *testing.T) {
 	tests := []struct {
 		name string

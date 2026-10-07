@@ -9,6 +9,20 @@ import (
 	"github.com/destinyamba/gh-pullkin/internal/depsdev"
 )
 
+const MaxPerRepo = 20
+
+var Labels = []string{
+	"good first issue",
+	"good-first-issue",
+	"help wanted",
+	"help-wanted",
+	"beginner",
+	"beginner friendly",
+	"easy",
+	"first-timers-only",
+	"up-for-grabs",
+}
+
 type Issue struct {
 	Repo       depsdev.Repo
 	Number     int
@@ -41,3 +55,4 @@ func New() (*Client, error) {
 func (c *Client) Open(ctx context.Context, repo depsdev.Repo) ([]Issue, error) {
 	return nil, errors.New("not implemented")
 }
+

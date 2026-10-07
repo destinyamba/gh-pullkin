@@ -9,7 +9,12 @@ import (
 const (
 	FreshAssigneeDays = 28
 	DeadAfterMonths   = 3
+	StaleIssueMonths  = 12
 )
+
+func Stale(issue issues.Issue, now time.Time) bool {
+	return issue.UpdatedAt.Before(now.AddDate(0, -StaleIssueMonths, 0))
+}
 
 func Taken(issue issues.Issue, now time.Time) bool {
 	if issue.HasOpenPR {
