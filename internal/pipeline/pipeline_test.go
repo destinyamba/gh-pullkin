@@ -118,6 +118,10 @@ require (
 		t.Errorf("expected shared repo to keep the direct dep")
 	}
 
+	if res.Deps != 6 {
+		t.Errorf("expected 6 dependencies, found %d", res.Deps)
+	}
+
 	if len(res.Skipped) != 1 {
 		t.Errorf("expected 1 skipped repo, found %d", len(res.Skipped))
 	}

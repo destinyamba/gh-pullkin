@@ -13,6 +13,7 @@ import (
 	"github.com/destinyamba/gh-pullkin/internal/issues"
 	"github.com/destinyamba/gh-pullkin/internal/manifest"
 	"github.com/destinyamba/gh-pullkin/internal/rank"
+	"golang.org/x/sync/errgroup"
 )
 
 type repoFinder interface {
@@ -30,6 +31,7 @@ type Pipeline struct {
 }
 
 type Result struct {
+	Deps       int
 	Candidates []rank.Candidate
 	Skipped    []error
 }
@@ -50,15 +52,30 @@ func (p *Pipeline) Run(ctx context.Context, dir string, now time.Time) (Result, 
 		return res, err
 	}
 
+	res.Deps = len(deps)
+
+	found := make([]depsdev.Repo, len(deps))
+	errs := make([]error, len(deps))
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(8)
+	for i, dep := range deps {
+		g.Go(func() error {
+			found[i], errs[i] = p.repos.SourceRepo(gctx, dep)
+			return nil
+		})
+	}
+	g.Wait()
+
 	byRepo := map[depsdev.Repo]manifest.Dep{}
-	for _, dep := range deps {
-		repo, err := p.repos.SourceRepo(ctx, dep)
-		if errors.Is(err, depsdev.ErrNoRepo) || errors.Is(err, depsdev.ErrNotFound) {
+	for i, dep := range deps {
+		if errors.Is(errs[i], depsdev.ErrNoRepo) || errors.Is(errs[i], depsdev.ErrNotFound) {
 			continue
 		}
-		if err != nil {
-			return res, err
+		if errs[i] != nil {
+			return res, errs[i]
 		}
+		repo := found[i]
 		if old, ok := byRepo[repo]; ok && (old.Direct || !dep.Direct) {
 			continue
 		}

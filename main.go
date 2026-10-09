@@ -49,6 +49,11 @@ func list() error {
 		fmt.Fprintln(os.Stderr, "skipped:", err)
 	}
 
+	if res.Deps == 0 {
+		fmt.Println("pullkin: no go.mod or package.json in this folder. Run it where your project's manifest is.")
+		return nil
+	}
+
 	if len(res.Candidates) == 0 {
 		fmt.Println("pullkin: no fixable issues found in your dependencies")
 		return nil
