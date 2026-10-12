@@ -123,7 +123,7 @@ func New() (*Client, error) {
 	return &Client{gh: gh}, nil
 }
 
-func (c *Client) Open(ctx context.Context, repo depsdev.Repo) ([]Issue, error) {
+func (c *Client) Open(gctx context.Context, repo depsdev.Repo) ([]Issue, error) {
 	quoted := make([]string, 0, len(Labels))
 	for _, l := range Labels {
 		quoted = append(quoted, fmt.Sprintf("%q", l))
@@ -133,7 +133,7 @@ func (c *Client) Open(ctx context.Context, repo depsdev.Repo) ([]Issue, error) {
 
 	var resp searchResponse
 	vars := map[string]interface{}{"q": search, "first": MaxPerRepo}
-	if err := c.gh.DoWithContext(ctx, searchQuery, vars, &resp); err != nil {
+	if err := c.gh.DoWithContext(gctx, searchQuery, vars, &resp); err != nil {
 		return nil, fmt.Errorf("search issues %s/%s: %w", repo.Owner, repo.Name, err)
 	}
 
@@ -169,10 +169,10 @@ func (c *Client) Open(ctx context.Context, repo depsdev.Repo) ([]Issue, error) {
 	return issues, nil
 }
 
-func (c *Client) Info(ctx context.Context, repo depsdev.Repo) (RepoInfo, error) {
+func (c *Client) Info(gctx context.Context, repo depsdev.Repo) (RepoInfo, error) {
 	var resp repoInfoResponse
 	vars := map[string]interface{}{"owner": repo.Owner, "name": repo.Name}
-	if err := c.gh.DoWithContext(ctx, repoInfoQuery, vars, &resp); err != nil {
+	if err := c.gh.DoWithContext(gctx, repoInfoQuery, vars, &resp); err != nil {
 		return RepoInfo{}, fmt.Errorf("get repo info %s/%s: %w", repo.Owner, repo.Name, err)
 	}
 

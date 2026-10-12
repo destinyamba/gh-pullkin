@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ func (f fakeRepos) SourceRepo(_ context.Context, dep manifest.Dep) (depsdev.Repo
 }
 
 type fakeIssues struct {
+	mu     sync.Mutex
 	info   map[depsdev.Repo]issues.RepoInfo
 	open   map[depsdev.Repo][]issues.Issue
 	broken map[depsdev.Repo]bool
@@ -41,7 +43,9 @@ func (f *fakeIssues) Info(_ context.Context, repo depsdev.Repo) (issues.RepoInfo
 }
 
 func (f *fakeIssues) Open(_ context.Context, repo depsdev.Repo) ([]issues.Issue, error) {
+	f.mu.Lock()
 	f.calls = append(f.calls, repo)
+	f.mu.Unlock()
 	return f.open[repo], nil
 }
 

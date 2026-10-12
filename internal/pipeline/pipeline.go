@@ -90,29 +90,46 @@ func (p *Pipeline) Run(ctx context.Context, dir string, now time.Time) (Result, 
 		return cmp.Or(cmp.Compare(a.Owner, b.Owner), cmp.Compare(a.Name, b.Name))
 	})
 
-	for _, repo := range repos {
-		info, err := p.issues.Info(ctx, repo)
-		if err != nil {
-			res.Skipped = append(res.Skipped, err)
-			continue
-		}
-		if filter.Dead(info, now) {
-			continue
-		}
+	perRepo := make([][]rank.Candidate, len(repos))
+	skipped := make([]error, len(repos))
+	g, gctx = errgroup.WithContext(ctx)
+	g.SetLimit(8)
+	for i, repo := range repos {
+		g.Go(func() error {
 
-		open, err := p.issues.Open(ctx, repo)
-		if err != nil {
-			res.Skipped = append(res.Skipped, err)
-			continue
-		}
-		for _, issue := range open {
-			if filter.Taken(issue, now) || filter.Stale(issue, now) {
-				continue
+			info, err := p.issues.Info(ctx, repo)
+			if err != nil {
+				skipped[i] = err
+				return nil
 			}
-			res.Candidates = append(res.Candidates, rank.Candidate{Issue: issue, Dep: byRepo[repo]})
-		}
+			if filter.Dead(info, now) {
+				return nil
+			}
+
+			open, err := p.issues.Open(ctx, repo)
+			if err != nil {
+				skipped[i] = err
+				return nil
+			}
+			for _, issue := range open {
+				if filter.Taken(issue, now) || filter.Stale(issue, now) {
+					continue
+				}
+				perRepo[i] = append(perRepo[i], rank.Candidate{Issue: issue, Dep: byRepo[repo]})
+			}
+			return nil
+		})
 	}
 
+	g.Wait()
+
+	for i, candidates := range perRepo {
+		if skipped[i] != nil {
+			res.Skipped = append(res.Skipped, skipped[i])
+		}
+		res.Candidates = append(res.Candidates, candidates...)
+	}
 	res.Candidates = rank.Rank(res.Candidates)
+
 	return res, nil
 }
