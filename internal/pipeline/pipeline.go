@@ -97,7 +97,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, now time.Time) (Result, 
 	for i, repo := range repos {
 		g.Go(func() error {
 
-			info, err := p.issues.Info(ctx, repo)
+			info, err := p.issues.Info(gctx, repo)
 			if err != nil {
 				skipped[i] = err
 				return nil
@@ -106,7 +106,7 @@ func (p *Pipeline) Run(ctx context.Context, dir string, now time.Time) (Result, 
 				return nil
 			}
 
-			open, err := p.issues.Open(ctx, repo)
+			open, err := p.issues.Open(gctx, repo)
 			if err != nil {
 				skipped[i] = err
 				return nil
