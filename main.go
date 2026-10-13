@@ -25,7 +25,14 @@ func run(args []string) error {
 	if len(args) > 0 && args[0] == "list" {
 		return list()
 	}
-	_, err := tea.NewProgram(tui.New()).Run()
+	p, err := pipeline.New()
+	if err != nil {
+		return err
+	}
+	load := func() (pipeline.Result, error) {
+		return p.Run(context.Background(), ".", time.Now())
+	}
+	_, err = tea.NewProgram(tui.New(load)).Run()
 	return err
 }
 
