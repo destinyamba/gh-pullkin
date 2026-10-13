@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/cli/go-gh/v2/pkg/browser"
+	"github.com/destinyamba/gh-pullkin/internal/issues"
 	"github.com/destinyamba/gh-pullkin/internal/pipeline"
 	"github.com/destinyamba/gh-pullkin/internal/rank"
 )
@@ -27,6 +28,7 @@ var (
 	dimStyle      = lipgloss.NewStyle().Foreground(gray)
 	selectedStyle = lipgloss.NewStyle().Bold(true)
 	errorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	boxStyle      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(pink).Padding(0, 1)
 )
 
 type state int
@@ -39,6 +41,8 @@ const (
 
 type LoadFunc func() (pipeline.Result, error)
 
+type ClaimFunc func(issueID, body string) (string, error)
+
 type loadedMsg struct {
 	res pipeline.Result
 	err error
@@ -48,8 +52,15 @@ type openedMsg struct {
 	err error
 }
 
+type claimedMsg struct {
+	issueID string
+	url     string
+	err     error
+}
+
 type Model struct {
 	load    LoadFunc
+	claim   ClaimFunc
 	state   state
 	spinner spinner.Model
 	res     pipeline.Result
@@ -59,11 +70,17 @@ type Model struct {
 	offset  int
 	width   int
 	height  int
+
+	confirming bool
+	posting    bool
+	claimed    map[string]string
 }
 
-func New(load LoadFunc) Model {
+func New(load LoadFunc, claim ClaimFunc) Model {
 	return Model{
 		load:    load,
+		claim:   claim,
+		claimed: map[string]string{},
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(cursorStyle)),
 		width:   80,
 		height:  24,
@@ -99,6 +116,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case claimedMsg:
+		m.posting, m.confirming = false, false
+		if msg.err != nil {
+			m.status = "could not post comment: " + msg.err.Error()
+			return m, nil
+		}
+		m.claimed[msg.issueID] = msg.url
+		m.status = "claimed: " + msg.url
+		return m, nil
+
 	case spinner.TickMsg:
 		if m.state != loading {
 			return m, nil
@@ -108,6 +135,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyPressMsg:
+		if m.confirming {
+			return m.updateConfirm(msg)
+		}
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
@@ -124,8 +154,43 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "opening " + c.Issue.URL
 				return m, openURL(c.Issue.URL)
 			}
+		case "c":
+			if c, ok := m.selected(); ok {
+				if url, done := m.claimed[c.Issue.ID]; done {
+					m.status = "already claimed: " + url
+					break
+				}
+				m.confirming = true
+				m.status = ""
+			}
 		}
 		m.clampOffset()
+	}
+	return m, nil
+}
+
+func (m Model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.posting {
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "y":
+		c, ok := m.selected()
+		if !ok {
+			m.confirming = false
+			return m, nil
+		}
+		m.posting = true
+		m.status = "posting..."
+		return m, postClaim(m.claim, c.Issue.ID)
+	case "n", "esc", "q":
+		m.confirming = false
+		m.status = "claim cancelled"
 	}
 	return m, nil
 }
@@ -167,14 +232,29 @@ func (m Model) render() string {
 	}
 
 	b.WriteString("\n")
+	if m.confirming {
+		if c, ok := m.selected(); ok {
+			b.WriteString(m.confirmBox(c) + "\n")
+		}
+	}
 	if m.status != "" {
 		b.WriteString(dimStyle.Render(m.status) + "\n")
 	}
 	if n := len(m.res.Skipped); n > 0 {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("%d repos skipped (could not load)", n)) + "\n")
 	}
-	b.WriteString(dimStyle.Render("↑/↓ move · enter open · q quit"))
+	if m.confirming {
+		b.WriteString(dimStyle.Render("y post · n cancel"))
+	} else {
+		b.WriteString(dimStyle.Render("↑/↓ move · enter open · c claim · q quit"))
+	}
 	return b.String()
+}
+
+func (m Model) confirmBox(c rank.Candidate) string {
+	head := fmt.Sprintf("Claim %s?", repoStyle.Render(fmt.Sprintf("%s/%s#%d", c.Issue.Repo.Owner, c.Issue.Repo.Name, c.Issue.Number)))
+	body := dimStyle.Render("This comment will be posted as you:")
+	return boxStyle.Render(head + "\n\n" + body + "\n" + issues.ClaimMessage)
 }
 
 func (m Model) row(i int, c rank.Candidate) string {
@@ -191,6 +271,9 @@ func (m Model) row(i int, c rank.Candidate) string {
 	}
 	if !c.Dep.Direct {
 		tag += " " + dimStyle.Render("indirect")
+	}
+	if _, done := m.claimed[c.Issue.ID]; done {
+		tag += " " + tagStyle.Render("✓ claimed")
 	}
 
 	used := 2 + len(repo) + 2 + lipgloss.Width(tag)
@@ -210,7 +293,11 @@ func (m Model) selected() (rank.Candidate, bool) {
 }
 
 func (m Model) listHeight() int {
-	return max(m.height-6, 1)
+	extra := 6
+	if m.confirming {
+		extra += 6
+	}
+	return max(m.height-extra, 1)
 }
 
 func (m *Model) clampOffset() {
@@ -235,5 +322,12 @@ func isGoodFirst(c rank.Candidate) bool {
 func openURL(url string) tea.Cmd {
 	return func() tea.Msg {
 		return openedMsg{err: browser.New("", io.Discard, io.Discard).Browse(url)}
+	}
+}
+
+func postClaim(claim ClaimFunc, issueID string) tea.Cmd {
+	return func() tea.Msg {
+		url, err := claim(issueID, issues.ClaimMessage)
+		return claimedMsg{issueID: issueID, url: url, err: err}
 	}
 }

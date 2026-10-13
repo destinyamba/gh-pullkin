@@ -112,3 +112,29 @@ func TestInfo(t *testing.T) {
 		t.Errorf("expected pushed at %v, found %v", want, info.PushedAt)
 	}
 }
+
+func TestComment(t *testing.T) {
+	c := fakeClient(t, `{"data":{"addComment":{"commentEdge":{"node":{"url":"https://github.com/cli/cli/issues/1#issuecomment-1"}}}}}`)
+	issueID := "MDU6SXNzdWUx"
+	body := "This is a test comment."
+
+	url, err := c.Comment(context.Background(), issueID, body)
+	if err != nil {
+		t.Fatalf("comment: %v", err)
+	}
+
+	if url != "https://github.com/cli/cli/issues/1#issuecomment-1" {
+		t.Errorf("expected comment URL %q, found %q", "https://github.com/cli/cli/issues/1#issuecomment-1", url)
+	}
+}
+
+func TestCommentError(t *testing.T) {
+	c := fakeClient(t, `{"errors":[{"message":"something went wrong"}]}`)
+	issueID := "MDU6SXNzdWUx"
+	body := "This is a test comment."
+
+	_, err := c.Comment(context.Background(), issueID, body)
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/destinyamba/gh-pullkin/internal/issues"
 	"github.com/destinyamba/gh-pullkin/internal/pipeline"
 	"github.com/destinyamba/gh-pullkin/internal/tui"
 )
@@ -29,10 +30,17 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	gh, err := issues.New()
+	if err != nil {
+		return err
+	}
 	load := func() (pipeline.Result, error) {
 		return p.Run(context.Background(), ".", time.Now())
 	}
-	_, err = tea.NewProgram(tui.New(load)).Run()
+	claim := func(issueID, body string) (string, error) {
+		return gh.Comment(context.Background(), issueID, body)
+	}
+	_, err = tea.NewProgram(tui.New(load, claim)).Run()
 	return err
 }
 

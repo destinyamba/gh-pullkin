@@ -12,11 +12,14 @@ import (
 
 const MaxPerRepo = 20
 
+const ClaimMessage = "Hi! I'd like to work on this. Is it still open for someone to take?"
+
 const searchQuery = `
 query($q: String!, $first: Int!) {
   search(query: $q, type: ISSUE, first: $first) {
     nodes {
       ... on Issue {
+	  	id
         number
         title
         url
@@ -43,10 +46,17 @@ query($owner: String!, $name: String!) {
   }
 }
 `
+const commentMutation = `
+mutation($id: ID!, $body: String!) {
+  addComment(input: {subjectId: $id, body: $body}) {
+    commentEdge { node { url } }
+  }
+}`
 
 type searchResponse struct {
 	Search struct {
 		Nodes []struct {
+			ID        string    `json:"id"`
 			Number    int       `json:"number"`
 			Title     string    `json:"title"`
 			URL       string    `json:"url"`
@@ -95,6 +105,7 @@ var Labels = []string{
 }
 
 type Issue struct {
+	ID         string
 	Repo       depsdev.Repo
 	Number     int
 	Title      string
@@ -155,6 +166,7 @@ func (c *Client) Open(gctx context.Context, repo depsdev.Repo) ([]Issue, error) 
 		}
 
 		issues = append(issues, Issue{
+			ID:         node.ID,
 			Repo:       repo,
 			Number:     node.Number,
 			Title:      node.Title,
@@ -180,4 +192,24 @@ func (c *Client) Info(gctx context.Context, repo depsdev.Repo) (RepoInfo, error)
 		Archived: resp.Repository.IsArchived,
 		PushedAt: resp.Repository.PushedAt,
 	}, nil
+}
+
+func (c *Client) Comment(ctx context.Context, issueID, body string) (string, error) {
+	vars := map[string]interface{}{
+		"id":   issueID,
+		"body": body,
+	}
+	var resp struct {
+		AddComment struct {
+			CommentEdge struct {
+				Node struct {
+					URL string `json:"url"`
+				} `json:"node"`
+			} `json:"commentEdge"`
+		} `json:"addComment"`
+	}
+	if err := c.gh.DoWithContext(ctx, commentMutation, vars, &resp); err != nil {
+		return "", fmt.Errorf("comment on issue %s: %w", issueID, err)
+	}
+	return resp.AddComment.CommentEdge.Node.URL, nil
 }

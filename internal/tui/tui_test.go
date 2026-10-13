@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 
 func cand(n int, title string) rank.Candidate {
 	return rank.Candidate{
-		Issue: issues.Issue{Repo: depsdev.Repo{Owner: "o", Name: "r"}, Number: n, Title: title, URL: "https://x/" + title},
+		Issue: issues.Issue{ID: fmt.Sprintf("I_%d", n), Repo: depsdev.Repo{Owner: "o", Name: "r"}, Number: n, Title: title, URL: "https://x/" + title},
 		Dep:   manifest.Dep{Direct: true},
 	}
 }
@@ -32,13 +33,17 @@ func press(m Model, key string) Model {
 		msg = tea.KeyPressMsg{Code: tea.KeyDown}
 	case "up":
 		msg = tea.KeyPressMsg{Code: tea.KeyUp}
+	case "esc":
+		msg = tea.KeyPressMsg{Code: tea.KeyEscape}
+	default:
+		msg = tea.KeyPressMsg{Code: rune(key[0]), Text: key}
 	}
 	next, _ := m.Update(msg)
 	return next.(Model)
 }
 
 func TestLoadingThenList(t *testing.T) {
-	m := New(nil)
+	m := New(nil, nil)
 	if !strings.Contains(m.render(), "Finding issues") {
 		t.Errorf("expected loading text")
 	}
@@ -51,7 +56,7 @@ func TestLoadingThenList(t *testing.T) {
 }
 
 func TestCursorStaysInBounds(t *testing.T) {
-	m := loaded(New(nil), pipeline.Result{Deps: 1, Candidates: []rank.Candidate{cand(1, "a"), cand(2, "b")}}, nil)
+	m := loaded(New(nil, nil), pipeline.Result{Deps: 1, Candidates: []rank.Candidate{cand(1, "a"), cand(2, "b")}}, nil)
 
 	m = press(m, "up")
 	if m.cursor != 0 {
@@ -64,18 +69,89 @@ func TestCursorStaysInBounds(t *testing.T) {
 }
 
 func TestEmptyStates(t *testing.T) {
-	noManifest := loaded(New(nil), pipeline.Result{}, nil).render()
+	noManifest := loaded(New(nil, nil), pipeline.Result{}, nil).render()
 	if !strings.Contains(noManifest, "No go.mod or package.json") {
 		t.Errorf("expected no-manifest message, found:\n%s", noManifest)
 	}
 
-	noIssues := loaded(New(nil), pipeline.Result{Deps: 3}, nil).render()
+	noIssues := loaded(New(nil, nil), pipeline.Result{Deps: 3}, nil).render()
 	if !strings.Contains(noIssues, "No fixable issues") {
 		t.Errorf("expected no-issues message, found:\n%s", noIssues)
 	}
 
-	failed := loaded(New(nil), pipeline.Result{}, errors.New("not logged in")).render()
+	failed := loaded(New(nil, nil), pipeline.Result{}, errors.New("not logged in")).render()
 	if !strings.Contains(failed, "not logged in") {
 		t.Errorf("expected error message, found:\n%s", failed)
+	}
+}
+
+func run(m Model, cmd tea.Cmd) Model {
+	if cmd == nil {
+		return m
+	}
+	next, _ := m.Update(cmd())
+	return next.(Model)
+}
+
+func pressCmd(m Model, key string) (Model, tea.Cmd) {
+	next, cmd := m.Update(tea.KeyPressMsg{Code: rune(key[0]), Text: key})
+	return next.(Model), cmd
+}
+
+func TestClaimPostsAfterYes(t *testing.T) {
+	var gotID, gotBody string
+	claim := func(id, body string) (string, error) {
+		gotID, gotBody = id, body
+		return "https://x/comment", nil
+	}
+	m := loaded(New(nil, claim), pipeline.Result{Deps: 1, Candidates: []rank.Candidate{cand(1, "a"), cand(2, "b")}}, nil)
+	m = press(m, "down")
+
+	m = press(m, "c")
+	if !m.confirming || !strings.Contains(m.render(), issues.ClaimMessage) {
+		t.Fatalf("expected confirm box with draft, found:\n%s", m.render())
+	}
+
+	m, cmd := pressCmd(m, "y")
+	m = run(m, cmd)
+
+	if gotID != "I_2" || gotBody != issues.ClaimMessage {
+		t.Errorf("expected claim on I_2 with the claim message, found %q %q", gotID, gotBody)
+	}
+	if m.confirming || !strings.Contains(m.render(), "✓ claimed") {
+		t.Errorf("expected claimed tag after posting, found:\n%s", m.render())
+	}
+
+	m = press(m, "c")
+	if m.confirming || !strings.Contains(m.status, "already claimed") {
+		t.Errorf("expected no second claim, found status %q", m.status)
+	}
+}
+
+func TestClaimCancel(t *testing.T) {
+	called := false
+	claim := func(string, string) (string, error) { called = true; return "", nil }
+
+	for _, key := range []string{"n", "esc"} {
+		m := loaded(New(nil, claim), pipeline.Result{Deps: 1, Candidates: []rank.Candidate{cand(1, "a")}}, nil)
+		m = press(press(m, "c"), key)
+		if m.confirming {
+			t.Errorf("%s: expected confirm box closed", key)
+		}
+	}
+	if called {
+		t.Errorf("expected no comment posted")
+	}
+}
+
+func TestClaimError(t *testing.T) {
+	claim := func(string, string) (string, error) { return "", errors.New("forbidden") }
+	m := loaded(New(nil, claim), pipeline.Result{Deps: 1, Candidates: []rank.Candidate{cand(1, "a")}}, nil)
+
+	m, cmd := pressCmd(press(m, "c"), "y")
+	m = run(m, cmd)
+
+	if !strings.Contains(m.status, "forbidden") || strings.Contains(m.render(), "✓ claimed") {
+		t.Errorf("expected error status and no claimed tag, found:\n%s", m.render())
 	}
 }
