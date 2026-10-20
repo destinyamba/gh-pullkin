@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -13,6 +14,7 @@ import (
 	"github.com/destinyamba/gh-pullkin/internal/issues"
 	"github.com/destinyamba/gh-pullkin/internal/pipeline"
 	"github.com/destinyamba/gh-pullkin/internal/rank"
+	"github.com/destinyamba/gh-pullkin/internal/state"
 )
 
 var (
@@ -31,17 +33,17 @@ var (
 	boxStyle      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(pink).Padding(0, 1)
 )
 
-type state int
+type phase int
 
 const (
-	loading state = iota
+	loading phase = iota
 	ready
 	failed
 )
 
 type LoadFunc func() (pipeline.Result, error)
 
-type ClaimFunc func(issueID, body string) (string, error)
+type ClaimFunc func(issue issues.Issue, body string) (string, error)
 
 type loadedMsg struct {
 	res pipeline.Result
@@ -54,6 +56,7 @@ type openedMsg struct {
 
 type claimedMsg struct {
 	issueID string
+	issue   issues.Issue
 	url     string
 	err     error
 }
@@ -61,7 +64,7 @@ type claimedMsg struct {
 type Model struct {
 	load    LoadFunc
 	claim   ClaimFunc
-	state   state
+	phase   phase
 	spinner spinner.Model
 	res     pipeline.Result
 	err     error
@@ -74,13 +77,17 @@ type Model struct {
 	confirming bool
 	posting    bool
 	claimed    map[string]string
+	work       []state.Work
+	now        func() time.Time
 }
 
-func New(load LoadFunc, claim ClaimFunc) Model {
+func New(load LoadFunc, claim ClaimFunc, work []state.Work) Model {
 	return Model{
 		load:    load,
 		claim:   claim,
-		claimed: map[string]string{},
+		claimed: state.Cache{Work: work}.Claimed(),
+		work:    work,
+		now:     time.Now,
 		spinner: spinner.New(spinner.WithSpinner(spinner.MiniDot), spinner.WithStyle(cursorStyle)),
 		width:   80,
 		height:  24,
@@ -103,9 +110,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case loadedMsg:
 		m.res, m.err = msg.res, msg.err
-		m.state = ready
+		m.phase = ready
 		if msg.err != nil {
-			m.state = failed
+			m.phase = failed
 		}
 		return m, nil
 
@@ -118,16 +125,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case claimedMsg:
 		m.posting, m.confirming = false, false
-		if msg.err != nil {
-			m.status = "could not post comment: " + msg.err.Error()
-			return m, nil
+		if msg.url != "" {
+			m.claimed[msg.issueID] = msg.url
+			m.work = append(m.work, state.Work{
+				Repo:       msg.issue.Repo.Owner + "/" + msg.issue.Repo.Name,
+				Issue:      msg.issue.Number,
+				IssueID:    msg.issue.ID,
+				Title:      msg.issue.Title,
+				CommentURL: msg.url,
+				ClaimedAt:  m.now(),
+			})
 		}
-		m.claimed[msg.issueID] = msg.url
-		m.status = "claimed: " + msg.url
+		switch {
+		case msg.err != nil && msg.url != "":
+			m.status = "claimed, but " + msg.err.Error()
+		case msg.err != nil:
+			m.status = "could not post comment: " + msg.err.Error()
+		default:
+			m.status = "claimed: " + msg.url
+		}
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.state != loading {
+		if m.phase != loading {
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -187,7 +207,7 @@ func (m Model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.posting = true
 		m.status = "posting..."
-		return m, postClaim(m.claim, c.Issue.ID)
+		return m, postClaim(m.claim, c.Issue)
 	case "n", "esc", "q":
 		m.confirming = false
 		m.status = "claim cancelled"
@@ -205,9 +225,11 @@ func (m Model) View() tea.View {
 func (m Model) render() string {
 	var b strings.Builder
 
-	switch m.state {
+	switch m.phase {
 	case loading:
-		fmt.Fprintf(&b, "%s\n\n%s Finding issues in your dependencies...\n", titleStyle.Render("pullkin"), m.spinner.View())
+		fmt.Fprintf(&b, "%s\n\n", titleStyle.Render("pullkin"))
+		b.WriteString(m.progress())
+		fmt.Fprintf(&b, "%s Finding issues in your dependencies...\n", m.spinner.View())
 		b.WriteString("\n" + dimStyle.Render("q quit"))
 		return b.String()
 
@@ -218,13 +240,14 @@ func (m Model) render() string {
 	}
 
 	cs := m.res.Candidates
+	header := m.progress()
 	switch {
 	case m.res.Deps == 0:
-		fmt.Fprintf(&b, "%s\n\nNo go.mod or package.json in this folder. Run pullkin where your project's manifest is.\n", titleStyle.Render("pullkin"))
+		fmt.Fprintf(&b, "%s\n\n%sNo go.mod or package.json in this folder. Run pullkin where your project's manifest is.\n", titleStyle.Render("pullkin"), header)
 	case len(cs) == 0:
-		fmt.Fprintf(&b, "%s\n\nNo fixable issues found in your dependencies.\n", titleStyle.Render("pullkin"))
+		fmt.Fprintf(&b, "%s\n\n%sNo fixable issues found in your dependencies.\n", titleStyle.Render("pullkin"), header)
 	default:
-		fmt.Fprintf(&b, "%s %s\n\n", titleStyle.Render("pullkin"), dimStyle.Render(fmt.Sprintf("· %d fixable issues", len(cs))))
+		fmt.Fprintf(&b, "%s %s\n\n%s", titleStyle.Render("pullkin"), dimStyle.Render(fmt.Sprintf("· %d fixable issues", len(cs))), header)
 		end := min(m.offset+m.listHeight(), len(cs))
 		for i := m.offset; i < end; i++ {
 			b.WriteString(m.row(i, cs[i]) + "\n")
@@ -285,6 +308,32 @@ func (m Model) row(i int, c rank.Candidate) string {
 	return pointer + repoStyle.Render(repo) + "  " + title + tag
 }
 
+func (m Model) progress() string {
+	if len(m.work) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("In progress") + "\n")
+	for i, w := range m.work {
+		if i == state.MaxShown {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  and %d more", len(m.work)-state.MaxShown)) + "\n")
+			break
+		}
+		line := fmt.Sprintf("%s#%d  ", w.Repo, w.Issue)
+		ago := dimStyle.Render("  claimed " + state.Ago(w.ClaimedAt, m.now()))
+		title := ansi.Truncate(w.Title, max(m.width-2-len(line)-lipgloss.Width(ago), 10), "…")
+		b.WriteString("  " + repoStyle.Render(line) + title + ago + "\n")
+	}
+	return b.String() + "\n"
+}
+
+func (m Model) progressLines() int {
+	if len(m.work) == 0 {
+		return 0
+	}
+	return min(len(m.work), state.MaxShown+1) + 2
+}
+
 func (m Model) selected() (rank.Candidate, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.res.Candidates) {
 		return rank.Candidate{}, false
@@ -293,7 +342,7 @@ func (m Model) selected() (rank.Candidate, bool) {
 }
 
 func (m Model) listHeight() int {
-	extra := 6
+	extra := 6 + m.progressLines()
 	if m.confirming {
 		extra += 6
 	}
@@ -325,9 +374,9 @@ func openURL(url string) tea.Cmd {
 	}
 }
 
-func postClaim(claim ClaimFunc, issueID string) tea.Cmd {
+func postClaim(claim ClaimFunc, issue issues.Issue) tea.Cmd {
 	return func() tea.Msg {
-		url, err := claim(issueID, issues.ClaimMessage)
-		return claimedMsg{issueID: issueID, url: url, err: err}
+		url, err := claim(issue, issues.ClaimMessage)
+		return claimedMsg{issueID: issue.ID, issue: issue, url: url, err: err}
 	}
 }

@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/destinyamba/gh-pullkin/internal/issues"
 	"github.com/destinyamba/gh-pullkin/internal/pipeline"
+	"github.com/destinyamba/gh-pullkin/internal/state"
 	"github.com/destinyamba/gh-pullkin/internal/tui"
 )
 
@@ -37,15 +38,39 @@ func run(args []string) error {
 	load := func() (pipeline.Result, error) {
 		return p.Run(context.Background(), ".", time.Now())
 	}
-	claim := func(issueID, body string) (string, error) {
-		return gh.Comment(context.Background(), issueID, body)
+	saved, err := state.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "pullkin: could not read saved work:", err)
 	}
-	_, err = tea.NewProgram(tui.New(load, claim)).Run()
+	claim := func(issue issues.Issue, body string) (string, error) {
+		url, err := gh.Comment(context.Background(), issue.ID, body)
+		if err != nil {
+			return "", err
+		}
+		saved.Add(state.Work{
+			Repo:       issue.Repo.Owner + "/" + issue.Repo.Name,
+			Issue:      issue.Number,
+			IssueID:    issue.ID,
+			Title:      issue.Title,
+			URL:        issue.URL,
+			CommentURL: url,
+			ClaimedAt:  time.Now(),
+		})
+		if err := state.Save(saved); err != nil {
+			return url, fmt.Errorf("could not save it: %w", err)
+		}
+		return url, nil
+	}
+	_, err = tea.NewProgram(tui.New(load, claim, saved.Work)).Run()
 	return err
 }
 
 func nudge() error {
-	fmt.Println("pullkin: nothing in progress")
+	saved, err := state.Load()
+	if err != nil {
+		return err
+	}
+	fmt.Println(saved.Summary(time.Now()))
 	return nil
 }
 

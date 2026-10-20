@@ -4,6 +4,22 @@ pullkin scans your project's dependencies, finds open issues in them that you co
 
 I built this because I struggled to find projects I wanted to contribute to or found intersting enough to be engaged and solve proactively. So I thought why not solve issues for project I already use daily or regularly.
 
+## Usage
+
+Run pullkin in the folder that has your `go.mod` or `package.json`:
+
+```
+gh pullkin
+```
+
+Use ↑/↓ to move, enter to open an issue, and c to claim it. pullkin shows the comment it will post and waits for you to press y.
+
+To see the issues you claimed each time you open a terminal, add this line to your `~/.zshrc` or `~/.bashrc`:
+
+```
+gh pullkin nudge
+```
+
 ## How pullkin picks issues
 
 pullkin reads your `go.mod` and `package.json`, finds each dependency's GitHub repo, and looks for open issues you could fix. It then drops issues someone else is working on, issues nobody has touched in a long time, and repos that won't merge your PR.

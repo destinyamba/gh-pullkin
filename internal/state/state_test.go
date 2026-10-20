@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -82,5 +83,59 @@ func TestLoadBadFile(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected an error for a broken file, found nil")
+	}
+}
+
+func TestAddReplacesSameIssue(t *testing.T) {
+	var c Cache
+	c.Add(Work{IssueID: "I_1", CommentURL: "old"})
+	c.Add(Work{IssueID: "I_2", CommentURL: "b"})
+	c.Add(Work{IssueID: "I_1", CommentURL: "new"})
+
+	if len(c.Work) != 2 {
+		t.Fatalf("expected 2 items, found %d", len(c.Work))
+	}
+	if got := c.Claimed()["I_1"]; got != "new" {
+		t.Errorf("expected I_1 to be updated, found %q", got)
+	}
+}
+
+func TestSummary(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+
+	if got := (Cache{}).Summary(now); got != "pullkin: nothing in progress" {
+		t.Errorf("empty: found %q", got)
+	}
+
+	one := Cache{Work: []Work{{Repo: "cli/cli", Issue: 9789, Title: "hangs", ClaimedAt: now.AddDate(0, 0, -3)}}}
+	want := "pullkin: 1 issue in progress\n  cli/cli#9789  hangs  (claimed 3 days ago)"
+	if got := one.Summary(now); got != want {
+		t.Errorf("one:\nexpected %q\nfound    %q", want, got)
+	}
+
+	var many Cache
+	for i := range 5 {
+		many.Add(Work{IssueID: fmt.Sprint(i), Repo: "o/r", Issue: i, ClaimedAt: now})
+	}
+	got := many.Summary(now)
+	if !strings.HasPrefix(got, "pullkin: 5 issues in progress") || !strings.HasSuffix(got, "and 2 more") {
+		t.Errorf("many: found %q", got)
+	}
+}
+
+func TestAgo(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		t    time.Time
+		want string
+	}{
+		{now.Add(-2 * time.Hour), "today"},
+		{now.AddDate(0, 0, -1), "1 day ago"},
+		{now.AddDate(0, 0, -10), "10 days ago"},
+	}
+	for _, tt := range tests {
+		if got := Ago(tt.t, now); got != tt.want {
+			t.Errorf("expected %q, found %q", tt.want, got)
+		}
 	}
 }
