@@ -53,3 +53,14 @@ pullkin skips a repo if either is true:
 - **It has had no push in 3 months.** Your PR is unlikely to get a review. (Will review age of last push in future iterations)
 
 These limits live in [`internal/filter/filter.go`](internal/filter/filter.go) as `FreshAssigneeDays`, `StaleIssueMonths`, and `DeadAfterMonths`. The labels and the per-repo limit live in [`internal/issues/issues.go`](internal/issues/issues.go) as `Labels` and `MaxPerRepo`.
+
+## Similar tools
+
+Other tools that look for issues in the packages you depend on, one ecosystem each:
+
+- [good-samaritan](https://github.com/stdavis/good-samaritan) for npm
+- [cargo-contribute](https://docs.rs/cargo-contribute) for Rust
+- [gem-contribute](https://github.com/cdhagmann/gem-contribute) for Ruby
+- composer-contribute for PHP
+
+pullkin covers Go and npm. It also drops issues that are taken, stale, or in quiet repos, and it helps you claim an issue and keep track of it.
